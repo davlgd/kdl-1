@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup V
+        uses: vlang/setup-v@v1.7
+        with:
+          # The 0.5.2 release tag fails to build itself on ubuntu-latest
+          # (vlib os C.open declaration conflict), so pin a known-good
+          # master commit instead.
+          version: aaaf0c7
+
+      - name: Run tests
+        run: v test .

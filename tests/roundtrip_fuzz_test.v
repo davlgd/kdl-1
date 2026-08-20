@@ -2,11 +2,12 @@ module main
 
 import kdl
 import rand
-import rand.seed
+import document
 
 fn test_roundtrip_fuzz() {
-	// Seed with a fixed value for reproducibility, but vary per iteration
-	mut rng := rand.new(seed.time_seed(20260716))
+	// Seed with a fixed value for reproducibility
+	mut rng := rand.new_default()
+	rng.seed([u32(20260716), u32(7)])
 
 	for i in 0 .. 100 {
 		src := generate_random_kdl(mut rng, i)
@@ -33,7 +34,7 @@ fn test_roundtrip_fuzz() {
 
 fn generate_random_kdl(mut rng rand.PRNG, seed_ int) string {
 	mut s := ''
-	mut r := rand.int(1, 5) or { 2 }
+	mut r := rng.int_in_range(1, 5) or { 2 }
 	for _ in 0 .. r {
 		s += generate_node(mut rng, 0)
 		s += '\n'
@@ -46,14 +47,14 @@ fn generate_node(mut rng rand.PRNG, depth int) string {
 	mut s := random_name(mut rng)
 
 	// Optional type annotation
-	if rand.int(0, 4) or { 0 } == 0 {
+	if rng.int_in_range(0, 4) or { 0 } == 0 {
 		s = '(${random_type(mut rng)})' + s
 	}
 
 	// Generate entries
-	n_entries := rand.int(0, 5) or { 2 }
+	n_entries := rng.int_in_range(0, 5) or { 2 }
 	for _ in 0 .. n_entries {
-		if rand.int(0, 3) or { 0 } == 0 {
+		if rng.int_in_range(0, 3) or { 0 } == 0 {
 			// Property
 			pkey := random_name(mut rng)
 			pval := random_value(mut rng)
@@ -65,9 +66,9 @@ fn generate_node(mut rng rand.PRNG, depth int) string {
 	}
 
 	// Optional children (up to depth 3)
-	if depth < 3 && rand.int(0, 3) or { 0 } == 0 {
+	if depth < 3 && rng.int_in_range(0, 3) or { 0 } == 0 {
 		s += ' {\n'
-		n_children := rand.int(0, 3) or { 1 }
+		n_children := rng.int_in_range(0, 3) or { 1 }
 		for _ in 0 .. n_children {
 			s += '\t' + generate_node(mut rng, depth + 1)
 			s += '\n'
@@ -79,39 +80,39 @@ fn generate_node(mut rng rand.PRNG, depth int) string {
 }
 
 fn random_name(mut rng rand.PRNG) string {
-	names := ['node', 'config', 'server', 'person', 'item', 'data', 'entry',
-		'log', 'test', 'value', 'x', 'my-node', 'foo_bar', 'baz-qux']
-	return names[rand.int(0, names.len) or { 0 }]
+	names := ['node', 'config', 'server', 'person', 'item', 'data', 'entry', 'log', 'test', 'value',
+		'x', 'my-node', 'foo_bar', 'baz-qux']
+	return names[rng.int_in_range(0, names.len) or { 0 }]
 }
 
 fn random_type(mut rng rand.PRNG) string {
-	types := ['u8', 'i32', 'f64', 'string', 'bool', 'date-time', 'uuid',
-		'person', 'url', 'hex', 'color']
-	return types[rand.int(0, types.len) or { 0 }]
+	types := ['u8', 'i32', 'f64', 'string', 'bool', 'date-time', 'uuid', 'person', 'url', 'hex',
+		'color']
+	return types[rng.int_in_range(0, types.len) or { 0 }]
 }
 
 fn random_value(mut rng rand.PRNG) string {
-	choice := rand.int(0, 7) or { 0 }
+	choice := rng.int_in_range(0, 7) or { 0 }
 	match choice {
 		0 {
 			// Quoted string
 			strings := ['"hello"', '"world"', '"test value"', '"a"', '"flag"']
-			return strings[rand.int(0, strings.len) or { 0 }]
+			return strings[rng.int_in_range(0, strings.len) or { 0 }]
 		}
 		1 {
 			// Integer
-			vals := ['0', '1', '42', '-7', '100', '0xFF', '0o77', '0b1010',
-				'1_000', '0xFF_FF', '-0o10']
-			return vals[rand.int(0, vals.len) or { 0 }]
+			vals := ['0', '1', '42', '-7', '100', '0xFF', '0o77', '0b1010', '1_000', '0xFF_FF',
+				'-0o10']
+			return vals[rng.int_in_range(0, vals.len) or { 0 }]
 		}
 		2 {
 			// Float
 			vals := ['3.14', '-2.5', '1.0e10', '2e-3', '-1.5e2']
-			return vals[rand.int(0, vals.len) or { 0 }]
+			return vals[rng.int_in_range(0, vals.len) or { 0 }]
 		}
 		3 {
 			// Boolean
-			return if rand.int(0, 2) or { 0 } == 0 { '#true' } else { '#false' }
+			return if rng.int_in_range(0, 2) or { 0 } == 0 { '#true' } else { '#false' }
 		}
 		4 {
 			return '#null'
@@ -119,7 +120,7 @@ fn random_value(mut rng rand.PRNG) string {
 		5 {
 			// Raw string
 			vals := ['#"raw"#', '##"rawer"##']
-			return vals[rand.int(0, vals.len) or { 0 }]
+			return vals[rng.int_in_range(0, vals.len) or { 0 }]
 		}
 		else {
 			return '"default"'
@@ -149,16 +150,16 @@ fn assert_nodes_equivalent(a kdl.Node, b kdl.Node, iter int, ndx int) {
 
 fn assert_entries_equivalent(a kdl.Entry, b kdl.Entry, iter int, ndx int, eidx int) {
 	match a {
-		kdl.Argument {
-			if b is kdl.Argument {
+		document.Argument {
+			if b is document.Argument {
 				assert a.type_name == b.type_name, 'iter ${iter} node[${ndx}] entry[${eidx}]: arg type'
 				assert_values_equivalent(a.value, b.value, iter, ndx, eidx)
 			} else {
-				assert false, 'iter ${iter} node[${ndx}] entry[${eidx}]: type mismatch Argument vs ${typeof(b)}'
+				assert false, 'iter ${iter} node[${ndx}] entry[${eidx}]: type mismatch Argument'
 			}
 		}
-		kdl.Property {
-			if b is kdl.Property {
+		document.Property {
+			if b is document.Property {
 				assert a.key == b.key, 'iter ${iter} node[${ndx}] entry[${eidx}]: key mismatch'
 				assert a.type_name == b.type_name, 'iter ${iter} node[${ndx}] entry[${eidx}]: prop type'
 				assert_values_equivalent(a.value, b.value, iter, ndx, eidx)
@@ -171,37 +172,37 @@ fn assert_entries_equivalent(a kdl.Entry, b kdl.Entry, iter int, ndx int, eidx i
 
 fn assert_values_equivalent(a kdl.Value, b kdl.Value, iter int, ndx int, eidx int) {
 	match a {
-		kdl.StringVal {
-			assert b is kdl.StringVal, 'iter ${iter} node[${ndx}] entry[${eidx}]: expected StringVal'
-			if b is kdl.StringVal {
+		document.StringVal {
+			assert b is document.StringVal, 'iter ${iter} node[${ndx}] entry[${eidx}]: expected StringVal'
+			if b is document.StringVal {
 				assert a.value == b.value, 'iter ${iter} node[${ndx}] entry[${eidx}]: string value "${a.value}" vs "${b.value}"'
 			}
 		}
-		kdl.IntVal {
-			assert b is kdl.IntVal, 'iter ${iter} node[${ndx}] entry[${eidx}]: expected IntVal'
-			if b is kdl.IntVal {
+		document.IntVal {
+			assert b is document.IntVal, 'iter ${iter} node[${ndx}] entry[${eidx}]: expected IntVal'
+			if b is document.IntVal {
 				assert a.value == b.value, 'iter ${iter} node[${ndx}] entry[${eidx}]: int value ${a.value} vs ${b.value}'
 			}
 		}
-		kdl.FloatVal {
-			assert b is kdl.FloatVal, 'iter ${iter} node[${ndx}] entry[${eidx}]: expected FloatVal'
+		document.FloatVal {
+			assert b is document.FloatVal, 'iter ${iter} node[${ndx}] entry[${eidx}]: expected FloatVal'
 			// Compare approximately
-			if b is kdl.FloatVal {
-				diff := a.value - b.value
+			if b is document.FloatVal {
+				mut diff := a.value - b.value
 				if diff < 0 {
 					diff = -diff
 				}
 				assert diff < 1e-9, 'iter ${iter} node[${ndx}] entry[${eidx}]: float ${a.value} vs ${b.value}'
 			}
 		}
-		kdl.BoolVal {
-			assert b is kdl.BoolVal, 'iter ${iter} node[${ndx}] entry[${eidx}]: expected BoolVal'
-			if b is kdl.BoolVal {
+		document.BoolVal {
+			assert b is document.BoolVal, 'iter ${iter} node[${ndx}] entry[${eidx}]: expected BoolVal'
+			if b is document.BoolVal {
 				assert a.value == b.value, 'iter ${iter} node[${ndx}] entry[${eidx}]: bool mismatch'
 			}
 		}
-		kdl.NullVal {
-			assert b is kdl.NullVal, 'iter ${iter} node[${ndx}] entry[${eidx}]: expected NullVal'
+		document.NullVal {
+			assert b is document.NullVal, 'iter ${iter} node[${ndx}] entry[${eidx}]: expected NullVal'
 		}
 	}
 }
