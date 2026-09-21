@@ -282,6 +282,16 @@ Errors are `kdl.MarshalError` values: `kind` tells what went wrong and `msg()` r
 
 `decode(encode(x)) == x` holds for the fields that are written, when their default values are zero values and their floats are not NaN (which is never equal to itself). A `none`, an empty list of structs (which has no node to write) or an empty `omitempty` field is left out, so it decodes to the field's default value, and a skipped field keeps its default.
 
+## Performance
+
+Parsing and encoding allocate about 2 KB per node (each node holds a map of properties and each value a boxed payload); writing and decoding allocate far less. On V master with the default Boehm garbage collector, this is what dominates for large documents: every collection marks the whole tree built so far, so the time grows faster than the size once the document has more than about 100 000 nodes. Measured with `-prod` on a document of 640 000 flat nodes (35 MB): `kdl.parse` takes 12.7 s, and 0.7 s once the collector is told to start with a heap large enough to hold the document:
+
+```sh
+GC_INITIAL_HEAP_SIZE=8G ./my_program big.kdl
+```
+
+`GC_INITIAL_HEAP_SIZE` is read by the Boehm collector at startup: it is the size the heap starts at, not a limit, and on macOS and Linux most of it is reserved address space until the program uses it. A program that only reads one document and exits can also be built with `v -prod -gc none`, which removes the collector altogether. For comparison, a document of 2 000 nodes (0.5 MB) parses in about 10 ms on the same machine.
+
 ## Limits
 
 - Floats are stored as `f64`, so a literal outside its range becomes `#inf` or `0.0`, and the original notation (`1.0E+10` versus `1e10`) is not preserved. Decoding into an `f32` rejects a value that would overflow or underflow to zero, but cannot see a loss that already happened in the `f64` conversion.
@@ -289,7 +299,13 @@ Errors are `kdl.MarshalError` values: `kind` tells what went wrong and `msg()` r
 
 ## Examples
 
-[`examples/config`](examples/config) reads a configuration file into a V struct, with defaults for optional settings and errors for mandatory ones.
+Each example runs with `v run examples/<name>/main.v` from a checkout of the module (see [Development](#development)).
+
+- [`config`](examples/config) reads a configuration file into a V struct field by field, with defaults for optional settings and errors for mandatory ones.
+- [`structs`](examples/structs) does the same with `kdl.encode` and `kdl.decode`, field tags and renaming.
+- [`walk`](examples/walk) walks the tree of a document (type annotations, arguments, properties, children) parsed from a text with comments, slashdash and escaped newlines, which leave no trace in the tree.
+- [`values`](examples/values) shows how every kind of value is read: integers in all bases, big integers, floats and their keywords, strings in all forms, booleans and null.
+- [`build`](examples/build) builds a document in code, writes it to a file, reads it back and changes it.
 
 ## Development
 
