@@ -175,6 +175,113 @@ fn main() {
 
 Anything produced by the parser round-trips: `kdl.parse(doc.str())` gives a document equal to `doc` (compare with `Document.equals`, which also treats two `#nan` values as equal).
 
+## Structs
+
+`kdl.encode` and `kdl.decode` map a V struct to a document and back. The struct is the document: each field is a top-level node named after the field.
+
+```v
+import kdl
+
+enum Mode {
+	dev
+	prod
+}
+
+struct Route {
+	path    string @[kdl: 'arg']
+	timeout f64 = 30.0
+}
+
+struct Server {
+	host   string = 'localhost'
+	port   u16    = 80
+	tls    ?bool
+	routes []Route @[kdl: 'route']
+}
+
+struct Config {
+	name            string
+	mode            Mode
+	max_connections int = 100
+	server          Server
+}
+
+const config_text = '
+name demo
+mode prod
+server host="0.0.0.0" port=8080 {
+    route "/api" timeout=2.5
+    route "/static"
+}
+'
+
+fn main() {
+	cfg := kdl.decode[Config](config_text, rename: .kebab_case)!
+	println(cfg.server.routes[1].timeout) // 30.0, the default value
+	print(kdl.encode(cfg, rename: .kebab_case)!)
+	// name demo
+	// mode prod
+	// max-connections 100
+	// server host="0.0.0.0" port=8080 {
+	//     route "/api" timeout=2.5
+	//     route "/static" timeout=30.0
+	// }
+}
+```
+
+A field is written according to its type and to where it is:
+
+| Field type | At the top level | Inside a node |
+|---|---|---|
+| `string`, `bool`, integers, floats, enums | node `name value` | property `name=value` |
+| struct | node `name` with the struct fields | child node `name` |
+| `[]T` of structs | one node `name` per element | one child node `name` per element |
+| `[]T` of scalars | node `name a b c` | child node `name a b c` |
+| `map[string]T` of scalars | node `name k1=v1 k2=v2` | child node `name k1=v1 k2=v2` |
+| `?T` of a scalar or a struct | as `T` when set, left out when `none`; `#null` decodes to `none` | same |
+
+Enums are written with the name of their variant (flag enums are not supported), integers outside the `i64` range with a `BigInt`. Pointers, fixed-size arrays, sum types, interfaces, arrays of arrays and maps with other keys or values are not supported. The `kdl` tag changes the name and the place of a field inside a node, with words separated by commas:
+
+| Tag | Effect |
+|---|---|
+| `@[kdl: 'name']` | uses `name` instead of the field name (no renaming applies) |
+| `@[kdl: 'arg']` | the field is the next argument of its node (scalars only) |
+| `@[kdl: 'args']` | the field gets the remaining arguments (`[]T` of scalars) |
+| `@[kdl: 'props']` | the field gets the properties that no other field reads (`map[string]T` of scalars) |
+| `@[kdl: 'child']` | a scalar is written as a child node `name value` instead of a property |
+| `@[kdl: 'omitempty']` or `@[omitempty]` | `''`, `0`, `false` and empty arrays and maps are not written; enum values are always written, and an option is written whenever it holds a value, even a zero one, and left out when `none` |
+| `@[kdl: '-']` or `@[skip]` | the field is ignored |
+
+For instance `@[kdl: 'route']` on a `[]Route` field or `@[kdl: 'bio,omitempty']`. `rename: .kebab_case` (or `.camel_case`, `.pascal_case`, `.screaming_snake_case`) converts the field names without a tag, in both directions.
+
+`kdl.decode_node[T](node)` fills a struct from one node, for example to read one section of a larger document:
+
+```v
+import kdl
+
+struct Server {
+	host string
+	port int
+}
+
+fn main() {
+	doc := kdl.parse('app { server host=localhost port=8080 }')!
+	app := doc.get('app') or { return }
+	server := kdl.decode_node[Server](app.child('server') or { return })!
+	println(server.port) // 8080
+}
+```
+
+Decoding is strict about what it reads and lenient about what it does not:
+
+- a field without a node or a property keeps its default value, and a list that is present replaces its default value;
+- nodes and properties without a matching field are ignored, so a file can have settings that the program does not know yet; a mistyped property name is therefore ignored as well;
+- a value of the wrong type, a number that does not fit (`300` for a `u8`), an unknown enum variant, a node that appears twice for a single field, an argument that no field reads, and extra arguments, properties or children on a node that holds a single value are errors.
+
+Errors are `kdl.MarshalError` values: `kind` tells what went wrong and `msg()` reads `path: message`, as in `server.route[1].timeout: expected f64, got string`. A struct that cannot be mapped (unknown tag word, unsupported type such as `[][]int`, two fields with the same name) is reported before any data is read. Syntax errors are still `kdl.ParseError` values.
+
+`decode(encode(x)) == x` holds for the fields that are written, when their default values are zero values and their floats are not NaN (which is never equal to itself). A `none`, an empty list of structs (which has no node to write) or an empty `omitempty` field is left out, so it decodes to the field's default value, and a skipped field keeps its default.
+
 ## Limits
 
 - Floats are stored as `f64`, so a literal outside its range becomes `#inf` or `0.0`, and the original notation (`1.0E+10` versus `1e10`) is not preserved. Decoding into an `f32` rejects a value that would overflow or underflow to zero, but cannot see a loss that already happened in the `f64` conversion.
@@ -195,6 +302,10 @@ v vet .
 The tests run from a checkout in a directory named `kdl`, which V resolves as the module itself. From a directory with another name, make the module importable first, for example with a directory that contains a `kdl` link to the checkout: `VMODULES=/path/to/that/directory v test .`.
 
 `kdl_conformance_test.v` runs the official [kdl-org test suite](https://github.com/kdl-org/kdl/tree/89c1087d5e7f530de328f18b6a0fad54ca8ea227/tests/test_cases) at commit `89c1087`, vendored in [`tests/test_cases`](tests/test_cases): the 95 invalid documents must be rejected, and the 243 valid ones must serialise to the expected canonical form and round-trip. Numbers are compared by value, since floats are stored as `f64` and their notation or out-of-range magnitude is not kept, and the empty document, which the suite writes as a single newline, is written as nothing.
+
+## Authors
+
+The module is co-authored by David Legrand ([@davlgd](https://github.com/davlgd)) and Jengro777 ([@Jengro777](https://github.com/Jengro777)). The parser, the writer and the data model come from David's implementation ([vlang/v#28819](https://github.com/vlang/v/pull/28819)); the struct marshaling, its field tags and several examples and tests come from Jengro777's ([vlang-community/kdl](https://github.com/vlang-community/kdl)).
 
 ## License
 
