@@ -180,6 +180,10 @@ Anything produced by the parser round-trips: `kdl.parse(doc.str())` gives a docu
 - Floats are stored as `f64`, so a literal outside its range becomes `#inf` or `0.0`, and the original notation (`1.0E+10` versus `1e10`) is not preserved. Decoding into an `f32` rejects a value that would overflow or underflow to zero, but cannot see a loss that already happened in the `f64` conversion.
 - Comments are parsed and discarded, as the specification defines them as syntax without a value: a document holds nodes and values only, so `Document.str()` cannot write them back and always emits its own canonical layout. Not keeping comments, whitespace and the original spelling of numbers and strings is also what keeps the parser small and fast.
 
+## Examples
+
+[`examples/config`](examples/config) reads a configuration file into a V struct, with defaults for optional settings and errors for mandatory ones.
+
 ## Development
 
 ```sh
